@@ -16,7 +16,7 @@ const ASSET: &str = "taskbar-monitor.exe";
 /// Tag of the latest release, e.g. "v0.2.0".
 pub fn latest_tag() -> Result<String, String> {
     let body = get("api.github.com", &format!("/repos/{REPO}/releases/latest"))?;
-    json_str(&String::from_utf8_lossy(&body), "tag_name").ok_or_else(|| "Phản hồi GitHub không có tag_name".into())
+    json_str(&String::from_utf8_lossy(&body), "tag_name").ok_or_else(|| tr!("GitHub response has no tag_name", "Phản hồi GitHub không có tag_name").into())
 }
 
 pub fn is_newer(tag: &str) -> bool {
@@ -32,17 +32,17 @@ fn parse(v: &str) -> (u32, u32, u32) {
 pub fn apply(tag: &str) -> Result<(), String> {
     let data = get("github.com", &format!("/{REPO}/releases/download/{tag}/{ASSET}"))?;
     if data.len() < 64 * 1024 || !data.starts_with(b"MZ") {
-        return Err("File tải về không phải exe hợp lệ".into());
+        return Err(tr!("The download is not a valid exe", "File tải về không phải exe hợp lệ").into());
     }
-    let exe = exe_path().ok_or("Không xác định được đường dẫn exe")?;
+    let exe = exe_path().ok_or(tr!("Couldn't determine the exe path", "Không xác định được đường dẫn exe"))?;
     let new = exe.with_extension("exe.new");
     let old = exe.with_extension("exe.old");
-    std::fs::write(&new, &data).map_err(|e| format!("Không ghi được {}: {e}", new.display()))?;
+    std::fs::write(&new, &data).map_err(|e| tr!(format!("Couldn't write {}: {e}", new.display()), format!("Không ghi được {}: {e}", new.display())))?;
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(&exe, &old).map_err(|e| format!("Không đổi tên được exe hiện tại: {e}"))?;
+    std::fs::rename(&exe, &old).map_err(|e| tr!(format!("Couldn't rename the current exe: {e}"), format!("Không đổi tên được exe hiện tại: {e}")))?;
     if let Err(e) = std::fs::rename(&new, &exe) {
         let _ = std::fs::rename(&old, &exe);
-        return Err(format!("Không thay được exe: {e}"));
+        return Err(tr!(format!("Couldn't replace the exe: {e}"), format!("Không thay được exe: {e}")));
     }
     Ok(())
 }
@@ -106,7 +106,7 @@ fn get(host: &str, path: &str) -> Result<Vec<u8>, String> {
         let _ = WinHttpSetTimeouts(session.0, 10_000, 10_000, 15_000, 30_000);
         let conn = open(
             WinHttpConnect(session.0, &HSTRING::from(host), INTERNET_DEFAULT_HTTPS_PORT, 0),
-            "Kết nối",
+            tr!("Connect", "Kết nối"),
         )?;
         let req = open(
             WinHttpOpenRequest(
@@ -118,10 +118,10 @@ fn get(host: &str, path: &str) -> Result<Vec<u8>, String> {
                 std::ptr::null(),
                 WINHTTP_FLAG_SECURE,
             ),
-            "Tạo request",
+            tr!("Open request", "Tạo request"),
         )?;
-        WinHttpSendRequest(req.0, None, None, 0, 0, 0).map_err(|e| err("Gửi request", e))?;
-        WinHttpReceiveResponse(req.0, std::ptr::null_mut()).map_err(|e| err("Nhận phản hồi", e))?;
+        WinHttpSendRequest(req.0, None, None, 0, 0, 0).map_err(|e| err(tr!("Send request", "Gửi request"), e))?;
+        WinHttpReceiveResponse(req.0, std::ptr::null_mut()).map_err(|e| err(tr!("Receive response", "Nhận phản hồi"), e))?;
 
         let mut status = 0u32;
         let mut len = size_of::<u32>() as u32;
@@ -133,9 +133,9 @@ fn get(host: &str, path: &str) -> Result<Vec<u8>, String> {
             &mut len,
             std::ptr::null_mut(),
         )
-        .map_err(|e| err("Đọc mã trạng thái", e))?;
+        .map_err(|e| err(tr!("Read status code", "Đọc mã trạng thái"), e))?;
         if status != 200 {
-            return Err(format!("GitHub trả về HTTP {status}"));
+            return Err(tr!(format!("GitHub returned HTTP {status}"), format!("GitHub trả về HTTP {status}")));
         }
 
         let mut out = Vec::new();
@@ -143,7 +143,7 @@ fn get(host: &str, path: &str) -> Result<Vec<u8>, String> {
         loop {
             let mut read = 0u32;
             WinHttpReadData(req.0, buf.as_mut_ptr() as *mut c_void, buf.len() as u32, &mut read)
-                .map_err(|e| err("Đọc dữ liệu", e))?;
+                .map_err(|e| err(tr!("Read data", "Đọc dữ liệu"), e))?;
             if read == 0 {
                 break;
             }

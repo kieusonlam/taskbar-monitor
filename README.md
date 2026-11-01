@@ -15,7 +15,7 @@ Shows CPU, GPU, VRAM and RAM usage right on the Windows taskbar. Click it for de
 - Hides automatically while a game or video is fullscreen.
 - Updates itself from GitHub Releases.
 
-The app's interface is currently in Vietnamese.
+The interface is available in English and Vietnamese. It follows the Windows display language by default and can be changed from the right-click menu.
 
 ## Install
 
@@ -29,7 +29,7 @@ Or manually:
 
 1. Download `taskbar-monitor.exe` from [Releases](https://github.com/kieusonlam/taskbar-monitor/releases/latest).
 2. Put it in a permanent folder, e.g. `%LOCALAPPDATA%\Programs\TaskbarMonitor\`, and run it.
-3. Right-click the bar and choose **Khởi động cùng Windows** (start with Windows).
+3. Right-click the bar and choose **Start with Windows**.
 
 The exe is not code-signed yet, so SmartScreen may warn on first run: click **More info**, then **Run anyway**.
 
@@ -39,11 +39,13 @@ The exe is not code-signed yet, so SmartScreen may warn on first run: click **Mo
 |---|---|
 | Left-click the bar | Open / close the detail panel |
 | Esc or click elsewhere | Close the detail panel |
-| Right-click the bar | Menu: check for updates, start with Windows, exit |
+| Right-click the bar | Menu: check for updates, start with Windows, language, exit |
+
+![Right-click menu](docs/menu.png)
 
 ## Updates
 
-The app checks for a new release 15 seconds after starting and then once a day. When one is available, a blue dot appears in the corner of the bar; right-click and choose the update item, and the app downloads the new exe, swaps it in and restarts.
+The app checks for a new release 15 seconds after starting and then once a day. When one is available, a blue dot appears in the corner of the bar; right-click and choose **Update to vX.Y.Z**, and the app downloads the new exe, swaps it in and restarts.
 
 Headless update, for scripts or deploying to many machines:
 

@@ -1,5 +1,8 @@
 #![windows_subsystem = "windows"]
 
+#[macro_use]
+mod i18n;
+
 mod autostart;
 mod gdi;
 mod metrics;
@@ -97,6 +100,7 @@ fn main() -> Result<()> {
             return Ok(());
         };
         update::cleanup();
+        i18n::init();
 
         let mut monitor = Monitor::new();
         monitor.tick();

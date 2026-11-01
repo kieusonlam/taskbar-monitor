@@ -148,21 +148,22 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     d.header("CPU", &pct(snap.cpu), C_CPU);
     d.line(&m.cpu_name, "");
     let ghz = if snap.cpu_mhz > 0.0 { format!("{:.2} GHz", snap.cpu_mhz / 1000.0) } else { String::new() };
-    d.line(&format!("{} luồng", snap.cores.len()), &ghz);
+    let n = snap.cores.len();
+    d.line(&tr!(format!("{n} threads"), format!("{n} luồng")), &ghz);
     d.spark(&m.cpu_hist, C_CPU, None);
     d.cores(&snap.cores);
     d.divider();
     d.header("RAM", &pct(snap.ram_pct()), C_RAM);
-    d.line("Đang dùng", &format!("{} / {} GB", gb(snap.ram_used), gb(snap.ram_total)));
-    d.line("Còn trống", &format!("{} GB", gb(snap.ram_total.saturating_sub(snap.ram_used))));
-    d.line("Bộ nhớ cam kết", &format!("{} / {} GB", gb(snap.commit_used), gb(snap.commit_limit)));
+    d.line(tr!("In use", "Đang dùng"), &format!("{} / {} GB", gb(snap.ram_used), gb(snap.ram_total)));
+    d.line(tr!("Available", "Còn trống"), &format!("{} GB", gb(snap.ram_total.saturating_sub(snap.ram_used))));
+    d.line(tr!("Committed", "Bộ nhớ cam kết"), &format!("{} / {} GB", gb(snap.commit_used), gb(snap.commit_limit)));
     d.spark(&m.ram_hist, C_RAM, None);
     d.divider();
-    d.header("Hệ thống", "", TEXT);
-    d.line("Tiến trình", &thousands(snap.processes as u64));
-    d.line("Luồng", &thousands(snap.threads as u64));
-    d.line("Handle", &thousands(snap.handles as u64));
-    d.line("Thời gian chạy", &uptime(snap.uptime_s));
+    d.header(tr!("System", "Hệ thống"), "", TEXT);
+    d.line(tr!("Processes", "Tiến trình"), &thousands(snap.processes as u64));
+    d.line(tr!("Threads", "Luồng"), &thousands(snap.threads as u64));
+    d.line(tr!("Handles", "Handle"), &thousands(snap.handles as u64));
+    d.line(tr!("Up time", "Thời gian chạy"), &uptime(snap.uptime_s));
     let left_h = d.y;
 
     // Right column
@@ -170,7 +171,7 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     d.y = pad;
     if snap.gpus.is_empty() {
         d.header("GPU", "–", DIM);
-        d.line("Không đọc được thông tin GPU", "");
+        d.line(tr!("GPU information unavailable", "Không đọc được thông tin GPU"), "");
     }
     for (i, g) in snap.gpus.iter().enumerate() {
         if i > 0 {
@@ -184,7 +185,7 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
         }
         d.line("VRAM", &format!("{} / {} GB", gb(g.vram_used), gb(g.vram_total)));
         d.thin_bar(g.vram_pct(), C_VRAM);
-        d.line("Bộ nhớ dùng chung", &format!("{} GB", gb(g.shared_used)));
+        d.line(tr!("Shared memory", "Bộ nhớ dùng chung"), &format!("{} GB", gb(g.shared_used)));
         d.spark(&m.gpu_hist[i], C_GPU, Some((&m.vram_hist[i], C_VRAM)));
     }
     let right_h = d.y;
@@ -314,10 +315,11 @@ fn gb(bytes: u64) -> String {
 
 fn thousands(n: u64) -> String {
     let s = n.to_string();
+    let sep = tr!(',', '.');
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
         if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push('.');
+            out.push(sep);
         }
         out.push(ch);
     }
@@ -327,7 +329,8 @@ fn thousands(n: u64) -> String {
 fn uptime(secs: u64) -> String {
     let (d, h, m, s) = (secs / 86400, secs / 3600 % 24, secs / 60 % 60, secs % 60);
     if d > 0 {
-        format!("{d} ngày {h:02}:{m:02}:{s:02}")
+        let days = tr!(if d == 1 { "day" } else { "days" }, "ngày");
+        format!("{d} {days} {h:02}:{m:02}:{s:02}")
     } else {
         format!("{h:02}:{m:02}:{s:02}")
     }

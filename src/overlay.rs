@@ -16,6 +16,7 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::gdi::{px, rgb, round_corners, Canvas, Font};
+use crate::i18n::{self, Choice};
 use crate::{autostart, popup, update, with_monitor};
 
 const CLASS: PCWSTR = w!("TaskbarMonitor.Overlay");
@@ -24,6 +25,9 @@ const TIMER_UPDATE: usize = 2;
 const ID_AUTOSTART: usize = 101;
 const ID_EXIT: usize = 102;
 const ID_UPDATE: usize = 103;
+const ID_LANG_AUTO: usize = 110;
+const ID_LANG_EN: usize = 111;
+const ID_LANG_VI: usize = 112;
 const MA_NOACTIVATE: isize = 3;
 /// wParam: 0 = up to date, 1 = update available, 2 = error. lParam: 1 if the user asked for the check.
 const WM_APP_CHECKED: u32 = WM_APP + 1;
@@ -136,20 +140,32 @@ unsafe fn on_checked(hwnd: HWND, code: usize, manual: bool) {
     if !manual {
         return;
     }
+    let v = update::VERSION;
     match code {
         1 => {
             let tag = latest().unwrap_or_default();
-            let text = format!("Có bản mới {tag} (đang dùng v{}).\n\nCập nhật ngay?", update::VERSION);
+            let text = tr!(
+                format!("Version {tag} is available (current v{v}).\n\nUpdate now?"),
+                format!("Có bản mới {tag} (đang dùng v{v}).\n\nCập nhật ngay?"),
+            );
             if message(hwnd, &text, MB_YESNO | MB_ICONQUESTION) == IDYES {
                 apply_async(hwnd, tag);
             }
         }
         0 => {
-            message(hwnd, &format!("Bạn đang dùng bản mới nhất (v{}).", update::VERSION), MB_OK | MB_ICONINFORMATION);
+            let text = tr!(
+                format!("You're on the latest version (v{v})."),
+                format!("Bạn đang dùng bản mới nhất (v{v})."),
+            );
+            message(hwnd, &text, MB_OK | MB_ICONINFORMATION);
         }
         _ => {
             let e = LAST_ERROR.lock().map(|e| e.clone()).unwrap_or_default();
-            message(hwnd, &format!("Không kiểm tra được cập nhật.\n\n{e}"), MB_OK | MB_ICONWARNING);
+            let text = tr!(
+                format!("Couldn't check for updates.\n\n{e}"),
+                format!("Không kiểm tra được cập nhật.\n\n{e}"),
+            );
+            message(hwnd, &text, MB_OK | MB_ICONWARNING);
         }
     }
 }
@@ -158,7 +174,8 @@ unsafe fn on_applied(hwnd: HWND, ok: bool) {
     UPDATING.store(false, Ordering::SeqCst);
     if !ok {
         let e = LAST_ERROR.lock().map(|e| e.clone()).unwrap_or_default();
-        message(hwnd, &format!("Cập nhật thất bại.\n\n{e}"), MB_OK | MB_ICONWARNING);
+        let text = tr!(format!("Update failed.\n\n{e}"), format!("Cập nhật thất bại.\n\n{e}"));
+        message(hwnd, &text, MB_OK | MB_ICONWARNING);
         return;
     }
     // The exe has been replaced: start the new version (it waits for this one to exit before taking the single-instance lock)
@@ -318,16 +335,31 @@ unsafe fn paint(hwnd: HWND) {
 unsafe fn context_menu(hwnd: HWND) {
     let Ok(menu) = CreatePopupMenu() else { return };
     let latest = latest();
+    let v = update::VERSION;
     let update_label = match &latest {
-        Some(tag) => format!("Cập nhật lên {tag} (đang dùng v{})", update::VERSION),
-        None => format!("Kiểm tra cập nhật (v{})", update::VERSION),
+        Some(tag) => tr!(
+            format!("Update to {tag} (current v{v})"),
+            format!("Cập nhật lên {tag} (đang dùng v{v})"),
+        ),
+        None => tr!(format!("Check for updates (v{v})"), format!("Kiểm tra cập nhật (v{v})")),
     };
-    let _ = AppendMenuW(menu, MF_STRING, ID_UPDATE, &HSTRING::from(update_label));
-    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-    let check = if autostart::enabled() { MF_CHECKED } else { MF_UNCHECKED };
-    let _ = AppendMenuW(menu, MF_STRING | check, ID_AUTOSTART, w!("Khởi động cùng Windows"));
-    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-    let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Thoát"));
+    let item = |m: HMENU, flags: MENU_ITEM_FLAGS, id: usize, text: &str| {
+        let _ = AppendMenuW(m, flags, id, &HSTRING::from(text));
+    };
+    item(menu, MF_STRING, ID_UPDATE, &update_label);
+    item(menu, MF_SEPARATOR, 0, "");
+    let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
+    item(menu, MF_STRING | check(autostart::enabled()), ID_AUTOSTART, tr!("Start with Windows", "Khởi động cùng Windows"));
+    if let Ok(sub) = CreatePopupMenu() {
+        // Language names stay in their own language so anyone can find theirs
+        let current = i18n::choice();
+        item(sub, MF_STRING | check(current == Choice::Auto), ID_LANG_AUTO, tr!("Automatic (Windows)", "Tự động (theo Windows)"));
+        item(sub, MF_STRING | check(current == Choice::En), ID_LANG_EN, "English");
+        item(sub, MF_STRING | check(current == Choice::Vi), ID_LANG_VI, "Tiếng Việt");
+        item(menu, MF_POPUP, sub.0 as usize, tr!("Language", "Ngôn ngữ"));
+    }
+    item(menu, MF_SEPARATOR, 0, "");
+    item(menu, MF_STRING, ID_EXIT, tr!("Exit", "Thoát"));
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
     // Must be foreground or the menu won't close when clicking elsewhere
@@ -348,6 +380,14 @@ unsafe fn context_menu(hwnd: HWND) {
             None => check_async(hwnd, true),
         },
         ID_AUTOSTART => autostart::set(!autostart::enabled()),
+        id @ (ID_LANG_AUTO | ID_LANG_EN | ID_LANG_VI) => {
+            i18n::set_choice(match id {
+                ID_LANG_EN => Choice::En,
+                ID_LANG_VI => Choice::Vi,
+                _ => Choice::Auto,
+            });
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
         ID_EXIT => {
             let _ = DestroyWindow(hwnd);
         }
