@@ -17,7 +17,7 @@ pub fn set(on: bool) {
             let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, VALUE);
             return;
         }
-        let Ok(exe) = std::env::current_exe() else { return };
+        let Some(exe) = crate::update::exe_path() else { return };
         let cmd: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain([0]).collect();
         let _ = RegSetKeyValueW(
             HKEY_CURRENT_USER,

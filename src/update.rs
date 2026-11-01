@@ -34,7 +34,7 @@ pub fn apply(tag: &str) -> Result<(), String> {
     if data.len() < 64 * 1024 || !data.starts_with(b"MZ") {
         return Err("File tải về không phải exe hợp lệ".into());
     }
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = exe_path().ok_or("Không xác định được đường dẫn exe")?;
     let new = exe.with_extension("exe.new");
     let old = exe.with_extension("exe.old");
     std::fs::write(&new, &data).map_err(|e| format!("Không ghi được {}: {e}", new.display()))?;
@@ -49,13 +49,22 @@ pub fn apply(tag: &str) -> Result<(), String> {
 
 /// Xóa `.exe.old` còn sót từ lần cập nhật trước.
 pub fn cleanup() {
-    if let Ok(exe) = std::env::current_exe() {
+    if let Some(exe) = exe_path() {
         let _ = std::fs::remove_file(exe.with_extension("exe.old"));
     }
 }
 
+/// Đường dẫn thật của exe. winget cài bản portable và tạo symlink để gọi từ terminal;
+/// nếu chạy qua symlink, `current_exe` trả về chính symlink, thay nó sẽ làm hỏng bản cài.
 pub fn exe_path() -> Option<PathBuf> {
-    std::env::current_exe().ok()
+    let exe = std::env::current_exe().ok()?;
+    let real = std::fs::canonicalize(&exe).unwrap_or(exe);
+    // canonicalize trả dạng \\?\C:\..., bỏ tiền tố để ghi registry và hiển thị cho đúng
+    let s = real.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => Some(PathBuf::from(rest)),
+        _ => Some(real),
+    }
 }
 
 /// Lấy giá trị chuỗi đầu tiên của `key` trong JSON. Đủ cho tag_name, không cần thư viện JSON.
