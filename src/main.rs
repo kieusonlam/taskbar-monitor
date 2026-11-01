@@ -53,9 +53,15 @@ pub fn tick() {
     popup::refresh();
 }
 
-/// The taskbar tends to reclaim the top of the z-order when the foreground window changes: push the bar back up at once.
-unsafe extern "system" fn on_foreground(_: HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
-    overlay::update_position(OVERLAY.get());
+/// The taskbar reclaims the top of the z-order on foreground changes, and also on its own (e.g. when
+/// Quick Settings closes). Top-level z-order changes raise EVENT_OBJECT_REORDER on the desktop
+/// window, so react to those as well as to foreground changes.
+unsafe extern "system" fn on_win_event(_: HWINEVENTHOOK, event: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
+    if event == EVENT_SYSTEM_FOREGROUND {
+        overlay::update_position(OVERLAY.get());
+    } else if hwnd == GetDesktopWindow() {
+        overlay::on_reorder(OVERLAY.get());
+    }
 }
 
 /// `taskbar-monitor.exe --update`: headless update (for scripts and mass deployment).
@@ -111,22 +117,17 @@ fn main() -> Result<()> {
         OVERLAY.set(overlay::create(hinst)?);
         overlay::update_position(OVERLAY.get());
 
-        let hook = SetWinEventHook(
-            EVENT_SYSTEM_FOREGROUND,
-            EVENT_SYSTEM_FOREGROUND,
-            None,
-            Some(on_foreground),
-            0,
-            0,
-            WINEVENT_OUTOFCONTEXT,
-        );
+        let hooks = [EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_REORDER]
+            .map(|e| SetWinEventHook(e, e, None, Some(on_win_event), 0, 0, WINEVENT_OUTOFCONTEXT));
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        let _ = UnhookWinEvent(hook);
+        for h in hooks {
+            let _ = UnhookWinEvent(h);
+        }
     }
     Ok(())
 }

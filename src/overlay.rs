@@ -1,8 +1,9 @@
 //! The metrics bar drawn over the taskbar.
 //!
 //! Windows 11 removed DeskBands, so nothing can be embedded in the taskbar. Instead this is a
-//! borderless topmost window placed just left of the notification area, pushed back on top
-//! whenever the taskbar reclaims the z-order.
+//! borderless topmost window placed just left of the notification area, put back above the taskbar
+//! whenever the taskbar reclaims the z-order. While Quick Settings is open the shell may draw the
+//! taskbar over every ordinary topmost window, so the bar can be hidden until it closes.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -225,17 +226,65 @@ fn load_color(v: f32) -> COLORREF {
 }
 
 /// Reposition, resize and push above the taskbar. Called every second and on every foreground change.
+///
+/// Only moves in the z-order when the taskbar has covered the bar, and then lands directly above
+/// the taskbar rather than at the very top, so it never jumps over a shell flyout.
 pub fn update_position(hwnd: HWND) {
     unsafe {
-        let Some((x, y, w, h)) = target_rect() else {
-            let _ = ShowWindow(hwnd, SW_HIDE);
+        let visible = IsWindowVisible(hwnd).as_bool();
+        let Some((tray, (x, y, w, h))) = target_rect() else {
+            if visible {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
             return;
         };
-        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        let mut flags = SWP_NOACTIVATE;
+        if !visible {
+            flags |= SWP_SHOWWINDOW;
+        }
+        let after = if !visible || is_above(tray, hwnd) {
+            match GetWindow(tray, GW_HWNDPREV) {
+                Ok(p) if p != hwnd => p,
+                _ => HWND_TOPMOST,
+            }
+        } else {
+            flags |= SWP_NOZORDER;
+            let mut r = RECT::default();
+            let _ = GetWindowRect(hwnd, &mut r);
+            if (r.left, r.top, r.right - r.left, r.bottom - r.top) == (x, y, w, h) {
+                return;
+            }
+            HWND::default()
+        };
+        let _ = SetWindowPos(hwnd, Some(after), x, y, w, h, flags);
     }
 }
 
-unsafe fn target_rect() -> Option<(i32, i32, i32, i32)> {
+/// Some top-level window changed z-order (fires often): only do the full update when the taskbar
+/// has just come over the bar.
+pub fn on_reorder(hwnd: HWND) {
+    unsafe {
+        if let Ok(tray) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) {
+            if IsWindowVisible(hwnd).as_bool() && is_above(tray, hwnd) {
+                update_position(hwnd);
+            }
+        }
+    }
+}
+
+/// Whether `a` is above `b` in the z-order.
+unsafe fn is_above(a: HWND, b: HWND) -> bool {
+    let mut h = b;
+    while let Ok(p) = GetWindow(h, GW_HWNDPREV) {
+        if p == a {
+            return true;
+        }
+        h = p;
+    }
+    false
+}
+
+unsafe fn target_rect() -> Option<(HWND, (i32, i32, i32, i32))> {
     let tray = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).ok()?;
     if !IsWindowVisible(tray).as_bool() || fullscreen_app_active(tray) {
         return None;
@@ -263,7 +312,7 @@ unsafe fn target_rect() -> Option<(i32, i32, i32, i32)> {
     };
     let th = tr.bottom - tr.top;
     let h = (th - px(12.0, scale)).max(px(24.0, scale)).min(th);
-    Some((right - px(8.0, scale) - l.width, tr.top + (th - h) / 2, l.width, h))
+    Some((tray, (right - px(8.0, scale) - l.width, tr.top + (th - h) / 2, l.width, h)))
 }
 
 /// Whether a fullscreen app (game, video) is active on the taskbar's monitor.
