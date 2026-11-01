@@ -1,69 +1,79 @@
 # Taskbar Monitor
 
-Hiển thị CPU, GPU, VRAM và RAM ngay trên taskbar Windows. Bấm vào để xem chi tiết.
+Shows CPU, GPU, VRAM and RAM usage right on the Windows taskbar. Click it for details.
 
-![Thanh số liệu trên taskbar](docs/taskbar.png)
+![Metrics bar on the taskbar](docs/taskbar.png)
 
-![Bảng chi tiết khi bấm vào](docs/popup.png)
+![Detail panel](docs/popup.png)
 
-## Tính năng
+## Features
 
-- **Nhẹ**: một file exe khoảng 350 KB, dùng khoảng 6 MB RAM. Không cần cài đặt, không cần quyền admin, không cài driver.
-- **Số liệu giống Task Manager**: CPU và GPU lấy qua Performance Counters (PDH), chạy với card NVIDIA, AMD, Intel và máy có nhiều GPU.
-- **Bảng chi tiết**: tải từng luồng CPU, xung nhịp, RAM và bộ nhớ cam kết, tải 3D / Copy / Video của từng GPU, VRAM, đồ thị 60 giây.
-- Số liệu ≥ 60% tô vàng, ≥ 85% tô đỏ.
-- Tự ẩn khi chơi game hoặc xem video toàn màn hình.
-- Tự cập nhật từ GitHub Releases.
+- **Lightweight**: a single ~350 KB exe using about 6 MB of RAM. No installer, no admin rights, no driver.
+- **Same numbers as Task Manager**: CPU and GPU come from Performance Counters (PDH). Works with NVIDIA, AMD and Intel graphics, including multi-GPU laptops.
+- **Detail panel**: per-thread CPU load, clock speed, RAM and commit charge, 3D / Copy / Video load per GPU, VRAM, and 60-second history graphs.
+- Values ≥ 60% turn yellow, ≥ 85% turn red.
+- Hides automatically while a game or video is fullscreen.
+- Updates itself from GitHub Releases.
 
-## Cài đặt
+The app's interface is currently in Vietnamese.
 
-1. Tải `taskbar-monitor.exe` ở trang [Releases](https://github.com/kieusonlam/taskbar-monitor/releases/latest).
-2. Chép vào một thư mục cố định, ví dụ `%LOCALAPPDATA%\Programs\TaskbarMonitor\`, rồi chạy.
-3. Chuột phải vào thanh, chọn **Khởi động cùng Windows**.
+## Install
 
-File exe chưa được ký số nên Windows SmartScreen có thể cảnh báo ở lần chạy đầu: bấm **More info** rồi **Run anyway**.
+With winget (once the package is approved):
 
-## Sử dụng
+```
+winget install LamKieu.TaskbarMonitor
+```
 
-| Thao tác | Kết quả |
+Or manually:
+
+1. Download `taskbar-monitor.exe` from [Releases](https://github.com/kieusonlam/taskbar-monitor/releases/latest).
+2. Put it in a permanent folder, e.g. `%LOCALAPPDATA%\Programs\TaskbarMonitor\`, and run it.
+3. Right-click the bar and choose **Khởi động cùng Windows** (start with Windows).
+
+The exe is not code-signed yet, so SmartScreen may warn on first run: click **More info**, then **Run anyway**.
+
+## Usage
+
+| Action | Result |
 |---|---|
-| Chuột trái vào thanh | Mở / đóng bảng chi tiết |
-| Esc hoặc bấm ra ngoài | Đóng bảng chi tiết |
-| Chuột phải vào thanh | Menu: cập nhật, khởi động cùng Windows, thoát |
+| Left-click the bar | Open / close the detail panel |
+| Esc or click elsewhere | Close the detail panel |
+| Right-click the bar | Menu: check for updates, start with Windows, exit |
 
-## Cập nhật
+## Updates
 
-App kiểm tra bản mới 15 giây sau khi khởi động và mỗi ngày một lần. Khi có bản mới, góc thanh hiện một chấm xanh; chuột phải chọn **Cập nhật lên vX.Y.Z**, app tự tải, thay file và khởi động lại.
+The app checks for a new release 15 seconds after starting and then once a day. When one is available, a blue dot appears in the corner of the bar; right-click and choose the update item, and the app downloads the new exe, swaps it in and restarts.
 
-Cập nhật từ dòng lệnh (cho script hoặc triển khai nhiều máy):
+Headless update, for scripts or deploying to many machines:
 
 ```
 taskbar-monitor.exe --update
 ```
 
-Mã thoát: `0` đã là bản mới nhất, `10` đã cập nhật, `1` lỗi.
+Exit code: `0` already up to date, `10` updated, `1` error.
 
-## Build từ mã nguồn
+## Build from source
 
-Cần Rust (toolchain MSVC):
+Requires Rust with the MSVC toolchain:
 
 ```
 cargo build --release
 ```
 
-File ra ở `target\release\taskbar-monitor.exe`.
+The binary is written to `target\release\taskbar-monitor.exe`.
 
-## Phát hành bản mới
+## Releasing
 
-1. Tăng `version` trong `Cargo.toml`, commit.
-2. Đẩy tag cùng số: `git tag v0.2.0 && git push origin v0.2.0`.
-3. GitHub Actions build và đăng exe lên Releases. Máy người dùng nhận bản mới trong vòng một ngày.
+1. Bump `version` in `Cargo.toml` and commit.
+2. Push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. GitHub Actions builds the exe and publishes the release. Installed copies pick it up within a day.
 
-## Giới hạn
+## Limitations
 
-- Windows 11 không còn cho nhúng vào taskbar, nên thanh là một cửa sổ nằm đè lên taskbar, đặt sát khay hệ thống. Chỉ hiện trên taskbar của màn hình chính.
-- Chưa có nhiệt độ: đọc nhiệt độ CPU cần kernel driver.
+- Windows 11 no longer allows embedding into the taskbar, so the bar is a separate window placed over the taskbar next to the notification area. It only appears on the primary monitor's taskbar.
+- No temperatures yet: reading CPU temperature requires a kernel driver.
 
-## Giấy phép
+## License
 
 [MIT](LICENSE)

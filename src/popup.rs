@@ -1,5 +1,5 @@
-//! Bảng chi tiết hiện ra khi bấm vào thanh. Hai cột: CPU, RAM, hệ thống bên trái; các GPU bên phải.
-//! Tự đóng khi mất focus hoặc bấm Esc.
+//! Detail panel shown when the bar is clicked. Two columns: CPU, RAM and system on the left; GPUs on the right.
+//! Closes on focus loss or Esc.
 
 use std::cell::Cell;
 
@@ -72,7 +72,7 @@ pub fn toggle() {
             hide(p);
             return;
         }
-        // Cú bấm vừa làm popup mất focus và tự đóng thì không mở lại ngay
+        // If this click just closed the popup by stealing focus, don't reopen it
         if GetTickCount64().saturating_sub(HIDDEN_AT.get()) < 250 {
             return;
         }
@@ -82,7 +82,7 @@ pub fn toggle() {
     }
 }
 
-/// Gọi mỗi giây: cập nhật nếu đang mở.
+/// Called every second: refresh if open.
 pub fn refresh() {
     let p = POPUP.get();
     unsafe {
@@ -106,7 +106,7 @@ fn width(s: f32) -> i32 {
     px(2.0 * PAD + 2.0 * COL_W + GUTTER, s)
 }
 
-/// Đặt popup ngay phía trên thanh, căn mép phải, không tràn khỏi vùng làm việc.
+/// Place the popup just above the bar, right-aligned, kept inside the work area.
 unsafe fn place(p: HWND) {
     let s = scale();
     let w = width(s);
@@ -136,7 +136,7 @@ unsafe fn paint(hwnd: HWND) {
     let _ = EndPaint(hwnd, &ps);
 }
 
-/// Vẽ toàn bộ nội dung, trả về chiều cao cần. Gọi với canvas cao 1px để đo.
+/// Draw all content and return the height needed. Call with a 1px-tall canvas to measure.
 fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     let snap = &m.snap;
     c.fill(0, 0, c.w, c.h, BG);
@@ -144,7 +144,7 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     let col_w = px(COL_W, s);
     let mut d = Doc::new(c, s, pad, col_w);
 
-    // Cột trái
+    // Left column
     d.header("CPU", &pct(snap.cpu), C_CPU);
     d.line(&m.cpu_name, "");
     let ghz = if snap.cpu_mhz > 0.0 { format!("{:.2} GHz", snap.cpu_mhz / 1000.0) } else { String::new() };
@@ -165,7 +165,7 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     d.line("Thời gian chạy", &uptime(snap.uptime_s));
     let left_h = d.y;
 
-    // Cột phải
+    // Right column
     d.x = pad + col_w + px(GUTTER, s);
     d.y = pad;
     if snap.gpus.is_empty() {
@@ -190,12 +190,12 @@ fn draw(c: &Canvas, s: f32, m: &Monitor) -> i32 {
     let right_h = d.y;
 
     let h = left_h.max(right_h) + pad;
-    // Vạch ngăn hai cột
+    // Column divider
     c.fill(pad + col_w + px(GUTTER / 2.0, s), pad, px(1.0, s).max(1), h - 2 * pad, DIV);
     h
 }
 
-/// Con trỏ vẽ theo dòng trong một cột.
+/// Line-by-line drawing cursor within a column.
 struct Doc<'a> {
     c: &'a Canvas,
     s: f32,
@@ -233,7 +233,7 @@ impl<'a> Doc<'a> {
         self.y += self.p(30.0);
     }
 
-    /// Nhãn mờ bên trái, giá trị sáng bên phải.
+    /// Dim label on the left, bright value on the right.
     fn line(&mut self, left: &str, right: &str) {
         self.c.font(&self.body);
         let rw = if right.is_empty() { 0 } else { self.c.measure(right).0 + self.p(8.0) };
@@ -269,7 +269,7 @@ impl<'a> Doc<'a> {
         self.y = y + h + self.p(8.0);
     }
 
-    /// Cột dọc cho từng luồng CPU, tự xuống hàng khi quá nhiều luồng.
+    /// One vertical bar per CPU thread, wrapping to more rows when there are many.
     fn cores(&mut self, cores: &[f32]) {
         let n = cores.len();
         if n == 0 {
@@ -298,7 +298,7 @@ impl<'a> Doc<'a> {
 }
 
 impl Drop for Doc<'_> {
-    // Nhả font của Doc khỏi DC trước khi font bị xóa (font đang được chọn thì DeleteObject thất bại)
+    // Deselect Doc's fonts before they are deleted (DeleteObject fails on a selected font)
     fn drop(&mut self) {
         self.c.release_font();
     }

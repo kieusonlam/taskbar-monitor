@@ -1,4 +1,4 @@
-//! Lớp vẽ mỏng trên GDI: mọi thứ vẽ vào bitmap trong bộ nhớ rồi BitBlt một lần, không nháy.
+//! Thin drawing layer over GDI: everything is drawn into an in-memory bitmap and BitBlt'd once, so nothing flickers.
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWM_WINDOW_CORNER_PREFERENCE};
@@ -10,7 +10,7 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(r as u32 | (g as u32) << 8 | (b as u32) << 16)
 }
 
-/// Trộn `a` vào `b` theo tỉ lệ `t` (0 = b, 1 = a).
+/// Blend `a` into `b` by `t` (0 = b, 1 = a).
 pub fn blend(a: COLORREF, b: COLORREF, t: f32) -> COLORREF {
     let ch = |c: COLORREF, s: u32| ((c.0 >> s) & 0xff) as f32;
     let mix = |s| (ch(a, s) * t + ch(b, s) * (1.0 - t)).round() as u32;
@@ -62,8 +62,8 @@ impl Drop for Font {
     }
 }
 
-/// Bitmap trong bộ nhớ. Font phải được tạo TRƯỚC Canvas để bị hủy SAU nó:
-/// Drop của Canvas trả DC về trạng thái gốc, nhả font ra rồi font mới xóa được.
+/// In-memory bitmap. Create fonts BEFORE the Canvas so they are dropped AFTER it:
+/// Canvas's Drop restores the DC, deselecting the font so it can then be deleted.
 pub struct Canvas {
     dc: HDC,
     bmp: HBITMAP,
@@ -96,7 +96,7 @@ impl Canvas {
         unsafe { SelectObject(self.dc, f.0.into()) };
     }
 
-    /// Chọn font hệ thống vào DC để font đang dùng có thể bị xóa.
+    /// Select a stock font into the DC so the current font can be deleted.
     pub fn release_font(&self) {
         unsafe { SelectObject(self.dc, GetStockObject(DEFAULT_GUI_FONT)) };
     }
@@ -121,7 +121,7 @@ impl Canvas {
         self.text(right - w, y, s, color);
     }
 
-    /// Một dòng, cắt bằng "…" nếu dài quá `w`.
+    /// Single line, truncated with "…" if wider than `w`.
     pub fn text_fit(&self, x: i32, y: i32, w: i32, h: i32, s: &str, color: COLORREF) {
         let mut r = RECT { left: x, top: y, right: x + w, bottom: y + h };
         unsafe {
@@ -153,14 +153,14 @@ impl Canvas {
         }
     }
 
-    /// Thanh ngang, `pct` 0..100.
+    /// Horizontal bar, `pct` 0..100.
     pub fn bar(&self, x: i32, y: i32, w: i32, h: i32, pct: f32, fg: COLORREF, track: COLORREF) {
         self.fill(x, y, w, h, track);
         let fw = (w as f32 * pct.clamp(0.0, 100.0) / 100.0).round() as i32;
         self.fill(x, y, fw, h, fg);
     }
 
-    /// Đồ thị 60 giây, mẫu mới nhất ở mép phải. `area`: tô vùng dưới đường.
+    /// 60-second graph, newest sample at the right edge. `area`: fill below the line.
     pub fn spark(&self, x: i32, y: i32, w: i32, h: i32, data: &Ring, color: COLORREF, area: Option<COLORREF>, thick: i32) {
         if data.len() < 2 {
             return;

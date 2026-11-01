@@ -1,4 +1,4 @@
-//! Bật/tắt chạy cùng Windows qua HKCU\...\Run (không cần quyền admin).
+//! Toggle start-with-Windows via HKCU\...\Run (no admin rights needed).
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::ERROR_SUCCESS;

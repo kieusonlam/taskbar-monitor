@@ -1,7 +1,7 @@
-//! Tự cập nhật qua GitHub Releases: hỏi API bản mới nhất, tải exe, thay file đang chạy, khởi động lại.
+//! Self-update via GitHub Releases: ask the API for the latest release, download the exe, replace the running file, restart.
 //!
-//! Windows cho đổi tên exe đang chạy nhưng không cho ghi đè, nên: tải về `.exe.new`,
-//! đổi exe hiện tại thành `.exe.old`, đổi `.exe.new` thành tên gốc. File `.old` bị xóa ở lần chạy sau.
+//! Windows allows renaming a running exe but not overwriting it, so: download to `.exe.new`,
+//! rename the current exe to `.exe.old`, rename `.exe.new` to the original name. `.old` is deleted on the next start.
 
 use std::ffi::c_void;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ pub const REPO: &str = "kieusonlam/taskbar-monitor";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const ASSET: &str = "taskbar-monitor.exe";
 
-/// Tag của bản phát hành mới nhất, ví dụ "v0.2.0".
+/// Tag of the latest release, e.g. "v0.2.0".
 pub fn latest_tag() -> Result<String, String> {
     let body = get("api.github.com", &format!("/repos/{REPO}/releases/latest"))?;
     json_str(&String::from_utf8_lossy(&body), "tag_name").ok_or_else(|| "Phản hồi GitHub không có tag_name".into())
@@ -28,7 +28,7 @@ fn parse(v: &str) -> (u32, u32, u32) {
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
-/// Tải exe của `tag` và thay vào chỗ exe đang chạy. Tiến trình hiện tại vẫn chạy bản cũ cho tới khi khởi động lại.
+/// Download the exe for `tag` and put it in place of the running exe. The current process keeps running the old version until restarted.
 pub fn apply(tag: &str) -> Result<(), String> {
     let data = get("github.com", &format!("/{REPO}/releases/download/{tag}/{ASSET}"))?;
     if data.len() < 64 * 1024 || !data.starts_with(b"MZ") {
@@ -47,19 +47,19 @@ pub fn apply(tag: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Xóa `.exe.old` còn sót từ lần cập nhật trước.
+/// Delete the `.exe.old` left over from a previous update.
 pub fn cleanup() {
     if let Some(exe) = exe_path() {
         let _ = std::fs::remove_file(exe.with_extension("exe.old"));
     }
 }
 
-/// Đường dẫn thật của exe. winget cài bản portable và tạo symlink để gọi từ terminal;
-/// nếu chạy qua symlink, `current_exe` trả về chính symlink, thay nó sẽ làm hỏng bản cài.
+/// Real path of the exe. winget installs portable apps and creates a symlink to run them from a terminal;
+/// when launched through it, `current_exe` returns the symlink, and replacing that would break the install.
 pub fn exe_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let real = std::fs::canonicalize(&exe).unwrap_or(exe);
-    // canonicalize trả dạng \\?\C:\..., bỏ tiền tố để ghi registry và hiển thị cho đúng
+    // canonicalize returns \\?\C:\...; strip the prefix for the registry and for display
     let s = real.to_string_lossy();
     match s.strip_prefix(r"\\?\") {
         Some(rest) if !rest.starts_with(r"UNC\") => Some(PathBuf::from(rest)),
@@ -67,7 +67,7 @@ pub fn exe_path() -> Option<PathBuf> {
     }
 }
 
-/// Lấy giá trị chuỗi đầu tiên của `key` trong JSON. Đủ cho tag_name, không cần thư viện JSON.
+/// First string value of `key` in a JSON document. Enough for tag_name without a JSON library.
 fn json_str(json: &str, key: &str) -> Option<String> {
     let after = &json[json.find(&format!("\"{key}\""))? + key.len() + 2..];
     let after = after.trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
@@ -94,7 +94,7 @@ fn open(h: *mut c_void, what: &str) -> Result<Handle, String> {
     }
 }
 
-/// HTTPS GET, tự theo redirect (link tải asset của GitHub chuyển hướng sang CDN).
+/// HTTPS GET, following redirects (GitHub asset downloads redirect to a CDN).
 fn get(host: &str, path: &str) -> Result<Vec<u8>, String> {
     let err = |what: &str, e: windows::core::Error| format!("{what}: {}", e.message());
     unsafe {

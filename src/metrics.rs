@@ -1,6 +1,6 @@
-//! Đọc số liệu hệ thống. Không cần driver, không cần quyền admin:
-//! CPU và GPU qua PDH (cùng nguồn với Task Manager), RAM qua GlobalMemoryStatusEx,
-//! tên và dung lượng VRAM của card qua DXGI.
+//! System metrics. No driver and no admin rights needed:
+//! CPU and GPU via PDH (the same source Task Manager uses), RAM via GlobalMemoryStatusEx,
+//! adapter names and VRAM size via DXGI.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -31,7 +31,7 @@ fn push(r: &mut Ring, v: f32) {
 pub struct GpuStat {
     pub name: String,
     pub util: f32,
-    /// (chỉ số trong ENGINE_LABELS, %), chỉ gồm loại engine card này từng báo về
+    /// (index into ENGINE_LABELS, %), only engine types this adapter has reported
     pub engines: Vec<(usize, f32)>,
     pub vram_used: u64,
     pub vram_total: u64,
@@ -58,7 +58,7 @@ pub struct Snapshot {
     pub handles: u32,
     pub uptime_s: u64,
     pub gpus: Vec<GpuStat>,
-    /// Card hiển thị trên thanh taskbar: card có VRAM riêng lớn nhất
+    /// Adapter shown on the taskbar bar: the one with the most dedicated VRAM
     pub main_gpu: Option<usize>,
 }
 
@@ -82,7 +82,7 @@ fn pct(used: u64, total: u64) -> f32 {
 
 struct Adapter {
     name: String,
-    /// "0x00000000_0x0000d1e3", khớp với tên instance của PDH
+    /// "0x00000000_0x0000d1e3", matches PDH instance names
     luid: String,
     vram_total: u64,
     seen_engines: [bool; ENGINE_LABELS.len()],
@@ -131,7 +131,7 @@ impl Monitor {
         if let Some(c) = self.pdh.cores {
             let mut cores: Vec<((u32, u32), f32)> = Vec::new();
             self.pdh.each(c, |name, v| {
-                // instance dạng "0,5" = (nhóm, luồng); bỏ "_Total" và "0,_Total"
+                // instance names look like "0,5" = (group, thread); skip "_Total" and "0,_Total"
                 let Some((g, i)) = name.split_once(',') else { return };
                 if let (Ok(g), Ok(i)) = (g.parse(), i.parse()) {
                     cores.push(((g, i), v.clamp(0.0, 100.0) as f32));
@@ -178,7 +178,7 @@ impl Monitor {
         let find = |luid: &str| adapters.iter().position(|a| a.luid.eq_ignore_ascii_case(luid));
 
         // Instance: "pid_1234_luid_0x00000000_0x0000D1E3_phys_0_eng_0_engtype_3D".
-        // Cộng dồn mọi tiến trình theo từng engine; % của card = engine bận nhất (giống Task Manager).
+        // Sum all processes per engine; the adapter's % is its busiest engine (same as Task Manager).
         let mut engines: HashMap<(usize, String), (Option<usize>, f64)> = HashMap::new();
         if let Some(c) = self.pdh.gpu_engine {
             self.pdh.each(c, |name, v| {
@@ -264,11 +264,11 @@ struct Pdh {
     gpu_engine: Option<PDH_HCOUNTER>,
     gpu_dedicated: Option<PDH_HCOUNTER>,
     gpu_shared: Option<PDH_HCOUNTER>,
-    /// Bộ đệm cho PdhGetFormattedCounterArrayW, u64 để đủ căn lề 8 byte
+    /// Buffer for PdhGetFormattedCounterArrayW; u64 for 8-byte alignment
     buf: Vec<u64>,
 }
 
-/// PDH_FMT_DOUBLE | PDH_FMT_NOCAP100 (crate không export hằng NOCAP100)
+/// PDH_FMT_DOUBLE | PDH_FMT_NOCAP100 (the crate doesn't export NOCAP100)
 const FMT: PDH_FMT = PDH_FMT(PDH_FMT_DOUBLE.0 | 0x8000);
 
 impl Pdh {
@@ -281,7 +281,7 @@ impl Pdh {
         };
         let pdh = Self {
             query,
-            // "% Processor Utility" là số Task Manager hiển thị; máy cũ không có thì lùi về "% Processor Time"
+            // "% Processor Utility" is what Task Manager shows; fall back to "% Processor Time" on older systems
             cpu: add(w!("\\Processor Information(_Total)\\% Processor Utility"))
                 .or_else(|| add(w!("\\Processor Information(_Total)\\% Processor Time"))),
             cores: add(w!("\\Processor Information(*)\\% Processor Utility"))
@@ -293,7 +293,7 @@ impl Pdh {
             gpu_shared: add(w!("\\GPU Adapter Memory(*)\\Shared Usage")),
             buf: Vec::new(),
         };
-        // Counter dạng tỉ lệ cần hai lần lấy mẫu, lấy lần đầu ngay để tick đầu tiên đã có số
+        // Rate counters need two samples; take the first now so the first tick already has values
         unsafe { PdhCollectQueryData(query) };
         pdh
     }
@@ -304,9 +304,9 @@ impl Pdh {
         (st == 0 && v.CStatus <= 1).then(|| unsafe { v.Anonymous.doubleValue })
     }
 
-    /// Gọi `f(tên instance, giá trị)` cho từng instance của counter wildcard.
+    /// Call `f(instance name, value)` for each instance of a wildcard counter.
     fn each(&mut self, c: PDH_HCOUNTER, mut f: impl FnMut(&str, f64)) {
-        // Số instance có thể tăng giữa hai lần gọi (tiến trình mới dùng GPU), nên thử lại vài lần
+        // The instance count can grow between the two calls (a new process starts using the GPU), so retry a few times
         for _ in 0..3 {
             let (mut size, mut count) = (0u32, 0u32);
             let st = unsafe { PdhGetFormattedCounterArrayW(c, FMT, &mut size, &mut count, None) };

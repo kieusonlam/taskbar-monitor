@@ -21,19 +21,19 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use metrics::Monitor;
 
-// Toàn bộ app chạy trên một luồng UI nên trạng thái để trong thread_local.
+// The whole app runs on a single UI thread, so state lives in thread_locals.
 thread_local! {
     static MONITOR: RefCell<Option<Monitor>> = const { RefCell::new(None) };
     pub static OVERLAY: Cell<HWND> = Cell::new(HWND::default());
     pub static POPUP: Cell<HWND> = Cell::new(HWND::default());
 }
 
-/// Đọc trạng thái số liệu. Trả None nếu đang bị mượn (không xảy ra trên luồng UI, nhưng không panic).
+/// Read the metrics state. Returns None if already borrowed (never happens on the UI thread, but avoids a panic).
 pub fn with_monitor<T>(f: impl FnOnce(&Monitor) -> T) -> Option<T> {
     MONITOR.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().map(f)))
 }
 
-/// Mỗi giây: lấy mẫu, đặt lại vị trí thanh, vẽ lại.
+/// Every second: sample, reposition the bar, repaint.
 pub fn tick() {
     MONITOR.with(|m| {
         if let Ok(mut m) = m.try_borrow_mut() {
@@ -50,13 +50,13 @@ pub fn tick() {
     popup::refresh();
 }
 
-/// Taskbar thường giành lại vị trí trên cùng khi đổi cửa sổ foreground: đẩy thanh lên lại ngay.
+/// The taskbar tends to reclaim the top of the z-order when the foreground window changes: push the bar back up at once.
 unsafe extern "system" fn on_foreground(_: HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
     overlay::update_position(OVERLAY.get());
 }
 
-/// `taskbar-monitor.exe --update`: cập nhật không cần giao diện (cho script, triển khai hàng loạt).
-/// Mã thoát: 0 = đã mới nhất, 10 = đã cập nhật, 1 = lỗi.
+/// `taskbar-monitor.exe --update`: headless update (for scripts and mass deployment).
+/// Exit code: 0 = already up to date, 10 = updated, 1 = error.
 fn update_cli() -> ! {
     let code = match update::latest_tag() {
         Ok(tag) if update::is_newer(&tag) => match update::apply(&tag) {
@@ -69,7 +69,7 @@ fn update_cli() -> ! {
     std::process::exit(code)
 }
 
-/// Giữ khóa một-phiên-bản. Sau khi tự cập nhật, bản mới đợi bản cũ thoát (tối đa 10 giây).
+/// Hold the single-instance lock. After a self-update the new version waits for the old one to exit (up to 10 s).
 unsafe fn single_instance(wait: bool) -> Option<HANDLE> {
     for _ in 0..50 {
         let h = CreateMutexW(None, true, w!("Local\\TaskbarMonitor.SingleInstance")).ok()?;

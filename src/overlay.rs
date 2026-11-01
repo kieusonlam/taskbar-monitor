@@ -1,8 +1,8 @@
-//! Thanh số liệu đè lên taskbar.
+//! The metrics bar drawn over the taskbar.
 //!
-//! Windows 11 bỏ DeskBand nên không nhúng được vào taskbar. Thay vào đó là một cửa sổ
-//! topmost không viền, đặt sát bên trái khay hệ thống, được đẩy lại lên trên mỗi khi
-//! taskbar giành lại thứ tự hiển thị.
+//! Windows 11 removed DeskBands, so nothing can be embedded in the taskbar. Instead this is a
+//! borderless topmost window placed just left of the notification area, pushed back on top
+//! whenever the taskbar reclaims the z-order.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,14 +25,14 @@ const ID_AUTOSTART: usize = 101;
 const ID_EXIT: usize = 102;
 const ID_UPDATE: usize = 103;
 const MA_NOACTIVATE: isize = 3;
-/// wParam: 0 = đang mới nhất, 1 = có bản mới, 2 = lỗi. lParam: 1 nếu người dùng tự bấm kiểm tra.
+/// wParam: 0 = up to date, 1 = update available, 2 = error. lParam: 1 if the user asked for the check.
 const WM_APP_CHECKED: u32 = WM_APP + 1;
-/// wParam: 1 = đã thay exe, 0 = lỗi.
+/// wParam: 1 = exe replaced, 0 = error.
 const WM_APP_APPLIED: u32 = WM_APP + 2;
 const UPDATE_FIRST_CHECK_MS: u32 = 15_000;
 const UPDATE_INTERVAL_MS: u32 = 24 * 60 * 60 * 1000;
 
-/// Tag bản mới hơn bản đang chạy, nếu có. Ghi từ luồng kiểm tra, đọc trên luồng UI.
+/// Tag of a release newer than the running one, if any. Written by the checker thread, read on the UI thread.
 static LATEST: Mutex<Option<String>> = Mutex::new(None);
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
 static UPDATING: AtomicBool = AtomicBool::new(false);
@@ -90,7 +90,7 @@ fn message(hwnd: HWND, text: &str, flags: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT
     unsafe { MessageBoxW(Some(hwnd), &HSTRING::from(text), w!("Taskbar Monitor"), flags) }
 }
 
-/// Hỏi GitHub ở luồng riêng, báo kết quả về bằng WM_APP_CHECKED.
+/// Ask GitHub on a worker thread and report back with WM_APP_CHECKED.
 fn check_async(hwnd: HWND, manual: bool) {
     let h = hwnd.0 as isize;
     std::thread::spawn(move || {
@@ -111,7 +111,7 @@ fn check_async(hwnd: HWND, manual: bool) {
     });
 }
 
-/// Tải và thay exe ở luồng riêng, báo kết quả về bằng WM_APP_APPLIED.
+/// Download and replace the exe on a worker thread and report back with WM_APP_APPLIED.
 fn apply_async(hwnd: HWND, tag: String) {
     if UPDATING.swap(true, Ordering::SeqCst) {
         return;
@@ -161,7 +161,7 @@ unsafe fn on_applied(hwnd: HWND, ok: bool) {
         message(hwnd, &format!("Cập nhật thất bại.\n\n{e}"), MB_OK | MB_ICONWARNING);
         return;
     }
-    // exe đã được thay: chạy bản mới (nó đợi bản này thoát rồi mới giữ khóa một-phiên-bản)
+    // The exe has been replaced: start the new version (it waits for this one to exit before taking the single-instance lock)
     if let Some(exe) = update::exe_path() {
         let _ = std::process::Command::new(exe).arg("--after-update").spawn();
     }
@@ -187,7 +187,7 @@ fn layout(scale: f32) -> Layout {
     c.font(&f);
     let p = |v| px(v, scale);
     let label_w = LABELS.map(|l| c.measure(l).0);
-    // Chỗ cho giá trị cố định theo "100%" để thanh không co giãn khi số thay đổi
+    // Value slots are sized for "100%" so the bar doesn't change width as numbers change
     let value_w = c.measure("100%").0;
     let (pad, gap_label, gap_item) = (p(12.0), p(6.0), p(16.0));
     let width = 2 * pad
@@ -207,7 +207,7 @@ fn load_color(v: f32) -> COLORREF {
     }
 }
 
-/// Đặt lại vị trí, kích thước và đẩy lên trên taskbar. Gọi mỗi giây và mỗi khi đổi cửa sổ foreground.
+/// Reposition, resize and push above the taskbar. Called every second and on every foreground change.
 pub fn update_position(hwnd: HWND) {
     unsafe {
         let Some((x, y, w, h)) = target_rect() else {
@@ -226,7 +226,7 @@ unsafe fn target_rect() -> Option<(i32, i32, i32, i32)> {
     let mut tr = RECT::default();
     GetWindowRect(tray, &mut tr).ok()?;
 
-    // Taskbar tự ẩn đang thụt xuống: ẩn theo
+    // Auto-hidden taskbar is tucked away: hide too
     let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
     if GetMonitorInfoW(MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool()
         && tr.bottom > mi.rcMonitor.bottom + 1
@@ -249,7 +249,7 @@ unsafe fn target_rect() -> Option<(i32, i32, i32, i32)> {
     Some((right - px(8.0, scale) - l.width, tr.top + (th - h) / 2, l.width, h))
 }
 
-/// Có ứng dụng toàn màn hình (game, video) trên cùng màn hình với taskbar không.
+/// Whether a fullscreen app (game, video) is active on the taskbar's monitor.
 unsafe fn fullscreen_app_active(tray: HWND) -> bool {
     let fg = GetForegroundWindow();
     if fg.is_invalid() {
@@ -307,7 +307,7 @@ unsafe fn paint(hwnd: HWND) {
         x += l.gap_item;
     }
     if latest().is_some() {
-        // Chấm báo có bản cập nhật
+        // Update-available dot
         let d = px(6.0, scale);
         c.dot(c.w - d - px(4.0, scale), px(4.0, scale), d, UPDATE_DOT);
     }
@@ -330,7 +330,7 @@ unsafe fn context_menu(hwnd: HWND) {
     let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Thoát"));
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
-    // Cần làm foreground thì menu mới tự đóng khi bấm ra ngoài
+    // Must be foreground or the menu won't close when clicking elsewhere
     let _ = SetForegroundWindow(hwnd);
     let cmd = TrackPopupMenu(
         menu,
@@ -359,7 +359,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     match msg {
         WM_TIMER if wp.0 == TIMER_TICK => crate::tick(),
         WM_TIMER if wp.0 == TIMER_UPDATE => {
-            // Lần đầu sau 15 giây, sau đó mỗi ngày một lần
+            // First check after 15 seconds, then once a day
             SetTimer(Some(hwnd), TIMER_UPDATE, UPDATE_INTERVAL_MS, None);
             if latest().is_none() {
                 check_async(hwnd, false);
