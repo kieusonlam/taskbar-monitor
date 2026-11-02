@@ -13,6 +13,7 @@ use windows::core::{w, Result, HSTRING, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::DWMWCP_ROUNDSMALL;
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::System::Registry::*;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -50,9 +51,55 @@ const HOT: COLORREF = rgb(0xff, 0x6b, 0x6b);
 const UPDATE_DOT: COLORREF = rgb(0x4f, 0xa3, 0xff);
 
 const LABELS: [&str; 4] = ["CPU", "GPU", "VRAM", "RAM"];
+const ID_SHOW: usize = 120; // + index into LABELS
+
+/// Which metrics are on the bar, one bit per entry of LABELS. Stored in
+/// HKCU\Software\TaskbarMonitor\Metrics; defaults to CPU, GPU and RAM.
+const DEFAULT_SHOWN: u32 = 0b1011;
+const SETTINGS_KEY: PCWSTR = w!("Software\\TaskbarMonitor");
+const SHOWN_VALUE: PCWSTR = w!("Metrics");
 
 thread_local! {
     static TASKBAR_CREATED: Cell<u32> = const { Cell::new(0) };
+    static SHOWN: Cell<u32> = Cell::new(load_shown());
+}
+
+fn load_shown() -> u32 {
+    let mut v = 0u32;
+    let mut size = 4u32;
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            SETTINGS_KEY,
+            SHOWN_VALUE,
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut v as *mut u32 as _),
+            Some(&mut size),
+        )
+    };
+    match v & 0b1111 {
+        bits if r == ERROR_SUCCESS && bits != 0 => bits,
+        _ => DEFAULT_SHOWN,
+    }
+}
+
+fn set_shown(bits: u32) {
+    SHOWN.set(bits);
+    unsafe {
+        let _ = RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            SETTINGS_KEY,
+            SHOWN_VALUE,
+            REG_DWORD.0,
+            Some(&bits as *const u32 as _),
+            4,
+        );
+    }
+}
+
+fn shown(i: usize) -> bool {
+    SHOWN.get() & (1 << i) != 0
 }
 
 pub unsafe fn create(hinst: HINSTANCE) -> Result<HWND> {
@@ -208,10 +255,11 @@ fn layout(scale: f32) -> Layout {
     // Value slots are sized for "100%" so the bar doesn't change width as numbers change
     let value_w = c.measure("100%").0;
     let (pad, gap_label, gap_item) = (p(12.0), p(6.0), p(16.0));
+    let n = (0..LABELS.len()).filter(|&i| shown(i)).count() as i32;
     let width = 2 * pad
-        + label_w.iter().sum::<i32>()
-        + 4 * (gap_label + value_w)
-        + 3 * gap_item;
+        + (0..LABELS.len()).filter(|&i| shown(i)).map(|i| label_w[i]).sum::<i32>()
+        + n * (gap_label + value_w)
+        + (n - 1) * gap_item;
     Layout { pad, gap_label, gap_item, label_w, value_w, width }
 }
 
@@ -363,7 +411,7 @@ unsafe fn paint(hwnd: HWND) {
 
     let y = (c.h - c.measure("0").1) / 2;
     let mut x = l.pad;
-    for (i, label) in LABELS.iter().enumerate() {
+    for (i, label) in LABELS.iter().enumerate().filter(|&(i, _)| shown(i)) {
         c.text(x, y, label, LABEL);
         x += l.label_w[i] + l.gap_label + l.value_w;
         match vals[i] {
@@ -398,6 +446,15 @@ unsafe fn context_menu(hwnd: HWND) {
     item(menu, MF_STRING, ID_UPDATE, &update_label);
     item(menu, MF_SEPARATOR, 0, "");
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
+    if let Ok(sub) = CreatePopupMenu() {
+        let last = SHOWN.get().count_ones() == 1;
+        for (i, label) in LABELS.iter().enumerate() {
+            // The last metric left can't be turned off, or the bar would be empty
+            let grayed = if last && shown(i) { MF_GRAYED } else { MF_ENABLED };
+            item(sub, MF_STRING | check(shown(i)) | grayed, ID_SHOW + i, label);
+        }
+        item(menu, MF_POPUP, sub.0 as usize, tr!("Show on taskbar", "Hiển thị trên taskbar"));
+    }
     item(menu, MF_STRING | check(autostart::enabled()), ID_AUTOSTART, tr!("Start with Windows", "Khởi động cùng Windows"));
     if let Ok(sub) = CreatePopupMenu() {
         // Language names stay in their own language so anyone can find theirs
@@ -429,6 +486,11 @@ unsafe fn context_menu(hwnd: HWND) {
             None => check_async(hwnd, true),
         },
         ID_AUTOSTART => autostart::set(!autostart::enabled()),
+        id if (ID_SHOW..ID_SHOW + LABELS.len()).contains(&id) => {
+            set_shown(SHOWN.get() ^ (1 << (id - ID_SHOW)));
+            update_position(hwnd);
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
         id @ (ID_LANG_AUTO | ID_LANG_EN | ID_LANG_VI) => {
             i18n::set_choice(match id {
                 ID_LANG_EN => Choice::En,

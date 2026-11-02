@@ -11,6 +11,7 @@ Shows CPU, GPU, VRAM and RAM usage right on the Windows taskbar. Click it for de
 - **Lightweight**: a single ~350 KB exe using about 6 MB of RAM. No installer, no admin rights, no driver.
 - **Same numbers as Task Manager**: CPU and GPU come from Performance Counters (PDH). Works with NVIDIA, AMD and Intel graphics, including multi-GPU laptops.
 - **Detail panel**: per-thread CPU load, clock speed, RAM and commit charge, 3D / Copy / Video load per GPU, VRAM, and 60-second history graphs.
+- Choose which metrics appear on the bar (CPU, GPU, VRAM, RAM) from the right-click menu. CPU, GPU and RAM are shown by default.
 - Values ≥ 60% turn yellow, ≥ 85% turn red.
 - Hides automatically while a game or video is fullscreen.
 - Updates itself from GitHub Releases.
@@ -39,7 +40,7 @@ The exe is not code-signed yet, so SmartScreen may warn on first run: click **Mo
 |---|---|
 | Left-click the bar | Open / close the detail panel |
 | Esc or click elsewhere | Close the detail panel |
-| Right-click the bar | Menu: check for updates, start with Windows, language, exit |
+| Right-click the bar | Menu: check for updates, metrics shown on the taskbar, start with Windows, language, exit |
 
 ![Right-click menu](docs/menu.png)
 
