@@ -7,6 +7,7 @@ mod autostart;
 mod gdi;
 mod metrics;
 mod overlay;
+mod package;
 mod popup;
 mod update;
 
@@ -98,6 +99,10 @@ unsafe fn single_instance(wait: bool) -> Option<HANDLE> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--update") {
+        if package::packaged() {
+            // The Store updates the package
+            std::process::exit(0);
+        }
         update_cli();
     }
     unsafe {
@@ -106,7 +111,9 @@ fn main() -> Result<()> {
         let Some(_instance) = single_instance(args.iter().any(|a| a == "--after-update")) else {
             return Ok(());
         };
-        update::cleanup();
+        if !package::packaged() {
+            update::cleanup();
+        }
         i18n::init();
 
         let mut monitor = Monitor::new();

@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies.windows]
 version = "0.62"
 features = [
+    "ApplicationModel",
+    "Foundation",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Dxgi",
@@ -18,6 +20,7 @@ features = [
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",
+    "Win32_Storage_Packaging_Appx",
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",

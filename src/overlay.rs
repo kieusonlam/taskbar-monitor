@@ -27,6 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::gdi::{px, rgb, round_corners, Canvas, Font};
 use crate::i18n::{self, Choice};
+use crate::package::packaged;
 use crate::{autostart, popup, update, with_monitor};
 
 const CLASS: PCWSTR = w!("TaskbarMonitor.Overlay");
@@ -162,7 +163,9 @@ pub unsafe fn create(hinst: HINSTANCE) -> Result<HWND> {
     round_corners(hwnd, DWMWCP_ROUNDSMALL);
     TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
     SetTimer(Some(hwnd), TIMER_TICK, 1000, None);
-    SetTimer(Some(hwnd), TIMER_UPDATE, UPDATE_FIRST_CHECK_MS, None);
+    if !packaged() {
+        SetTimer(Some(hwnd), TIMER_UPDATE, UPDATE_FIRST_CHECK_MS, None);
+    }
     appbar(hwnd, ABM_NEW);
     Ok(hwnd)
 }
@@ -533,7 +536,12 @@ unsafe fn context_menu(hwnd: HWND) {
     let item = |m: HMENU, flags: MENU_ITEM_FLAGS, id: usize, text: &str| {
         let _ = AppendMenuW(m, flags, id, &HSTRING::from(text));
     };
-    item(menu, MF_STRING, ID_UPDATE, &update_label);
+    if packaged() {
+        // The Store keeps it up to date: just show the version
+        item(menu, MF_STRING | MF_GRAYED, 0, &format!("Taskbar Monitor v{v}"));
+    } else {
+        item(menu, MF_STRING, ID_UPDATE, &update_label);
+    }
     item(menu, MF_SEPARATOR, 0, "");
     let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
     if let Ok(sub) = CreatePopupMenu() {
@@ -585,7 +593,15 @@ unsafe fn context_menu(hwnd: HWND) {
             Some(tag) => apply_async(hwnd, tag),
             None => check_async(hwnd, true),
         },
-        ID_AUTOSTART => autostart::set(!autostart::enabled()),
+        ID_AUTOSTART => {
+            if !autostart::set(!autostart::enabled()) {
+                let text = tr!(
+                    "Windows didn't allow starting with Windows. Turn Taskbar Monitor on in Settings > Apps > Startup.",
+                    "Windows không cho bật khởi động cùng Windows. Hãy bật Taskbar Monitor trong Cài đặt > Ứng dụng > Khởi động.",
+                );
+                message(text, MB_OK | MB_ICONINFORMATION);
+            }
+        }
         id if (ID_SHOW..ID_SHOW + LABELS.len()).contains(&id) => {
             set_shown(SHOWN.get() ^ (1 << (id - ID_SHOW)));
             update_position(hwnd);
