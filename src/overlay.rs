@@ -2,19 +2,27 @@
 //!
 //! Windows 11 removed DeskBands, so nothing can be embedded in the taskbar. Instead this is a
 //! borderless topmost window placed just left of the notification area, put back above the taskbar
-//! whenever the taskbar reclaims the z-order. While Quick Settings is open the shell may draw the
-//! taskbar over every ordinary topmost window, so the bar can be hidden until it closes.
+//! whenever the taskbar reclaims the z-order.
+//!
+//! While Start or Quick Settings is open the shell lifts the taskbar from the desktop z-band (1)
+//! into band 6, above every ordinary topmost window, and it can stay there after the panel closes
+//! (e.g. when the panel is closed by clicking its taskbar button). Windows owned by the taskbar are
+//! lifted with it, so the bar is created owned by the taskbar; the shell then drops the ownership
+//! but leaves the bar in band 6 for good.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-use windows::core::{w, Result, HSTRING, PCWSTR};
+use windows::core::{s, w, Result, BOOL, HSTRING, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::DWMWCP_ROUNDSMALL;
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Registry::*;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::gdi::{px, rgb, round_corners, Canvas, Font};
@@ -42,6 +50,13 @@ const UPDATE_INTERVAL_MS: u32 = 24 * 60 * 60 * 1000;
 static LATEST: Mutex<Option<String>> = Mutex::new(None);
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
 static UPDATING: AtomicBool = AtomicBool::new(false);
+/// Set before destroying the bar on purpose. Otherwise its destruction came from the taskbar (its
+/// owner) going away with Explorer, and the bar is recreated instead of quitting.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+/// Posted to the UI thread (no window) to recreate the bar after it was destroyed with its owner.
+pub const WM_APP_RECREATE: u32 = WM_APP + 3;
+/// Appbar notifications from the shell. wParam: ABN_* code.
+const WM_APP_APPBAR: u32 = WM_APP + 4;
 
 const BG: COLORREF = rgb(0x1c, 0x1c, 0x1c);
 const LABEL: COLORREF = rgb(0xb4, 0xb4, 0xb4);
@@ -112,6 +127,7 @@ pub unsafe fn create(hinst: HINSTANCE) -> Result<HWND> {
         ..Default::default()
     };
     RegisterClassExW(&wc);
+    let owner = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).ok();
     let hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
         CLASS,
@@ -121,7 +137,7 @@ pub unsafe fn create(hinst: HINSTANCE) -> Result<HWND> {
         0,
         0,
         0,
-        None,
+        owner,
         None,
         Some(hinst),
         None,
@@ -131,15 +147,40 @@ pub unsafe fn create(hinst: HINSTANCE) -> Result<HWND> {
     TASKBAR_CREATED.set(RegisterWindowMessageW(w!("TaskbarCreated")));
     SetTimer(Some(hwnd), TIMER_TICK, 1000, None);
     SetTimer(Some(hwnd), TIMER_UPDATE, UPDATE_FIRST_CHECK_MS, None);
+    appbar(hwnd, ABM_NEW);
     Ok(hwnd)
+}
+
+/// Registered as an appbar (without reserving any screen space) only to get ABN_FULLSCREENAPP the
+/// moment an app goes fullscreen or leaves it, e.g. a browser video, which resizes its window
+/// without a foreground change.
+unsafe fn appbar(hwnd: HWND, msg: u32) {
+    let mut abd = APPBARDATA {
+        cbSize: size_of::<APPBARDATA>() as u32,
+        hWnd: hwnd,
+        uCallbackMessage: WM_APP_APPBAR,
+        ..Default::default()
+    };
+    SHAppBarMessage(msg, &mut abd);
+}
+
+unsafe fn quit(hwnd: HWND) {
+    QUITTING.store(true, Ordering::SeqCst);
+    let _ = DestroyWindow(hwnd);
 }
 
 fn latest() -> Option<String> {
     LATEST.lock().ok()?.clone()
 }
 
-fn message(hwnd: HWND, text: &str, flags: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
-    unsafe { MessageBoxW(Some(hwnd), &HSTRING::from(text), w!("Taskbar Monitor"), flags) }
+/// Owner for menus and message boxes. Windows refuses to open them (access denied) from a window in
+/// band 6, so they hang off the detail panel, which stays in the ordinary band.
+fn host() -> HWND {
+    crate::POPUP.get()
+}
+
+fn message(text: &str, flags: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
+    unsafe { MessageBoxW(Some(host()), &HSTRING::from(text), w!("Taskbar Monitor"), flags) }
 }
 
 /// Ask GitHub on a worker thread and report back with WM_APP_CHECKED.
@@ -196,7 +237,7 @@ unsafe fn on_checked(hwnd: HWND, code: usize, manual: bool) {
                 format!("Version {tag} is available (current v{v}).\n\nUpdate now?"),
                 format!("Có bản mới {tag} (đang dùng v{v}).\n\nCập nhật ngay?"),
             );
-            if message(hwnd, &text, MB_YESNO | MB_ICONQUESTION) == IDYES {
+            if message(&text, MB_YESNO | MB_ICONQUESTION) == IDYES {
                 apply_async(hwnd, tag);
             }
         }
@@ -205,7 +246,7 @@ unsafe fn on_checked(hwnd: HWND, code: usize, manual: bool) {
                 format!("You're on the latest version (v{v})."),
                 format!("Bạn đang dùng bản mới nhất (v{v})."),
             );
-            message(hwnd, &text, MB_OK | MB_ICONINFORMATION);
+            message(&text, MB_OK | MB_ICONINFORMATION);
         }
         _ => {
             let e = LAST_ERROR.lock().map(|e| e.clone()).unwrap_or_default();
@@ -213,7 +254,7 @@ unsafe fn on_checked(hwnd: HWND, code: usize, manual: bool) {
                 format!("Couldn't check for updates.\n\n{e}"),
                 format!("Không kiểm tra được cập nhật.\n\n{e}"),
             );
-            message(hwnd, &text, MB_OK | MB_ICONWARNING);
+            message(&text, MB_OK | MB_ICONWARNING);
         }
     }
 }
@@ -223,14 +264,14 @@ unsafe fn on_applied(hwnd: HWND, ok: bool) {
     if !ok {
         let e = LAST_ERROR.lock().map(|e| e.clone()).unwrap_or_default();
         let text = tr!(format!("Update failed.\n\n{e}"), format!("Cập nhật thất bại.\n\n{e}"));
-        message(hwnd, &text, MB_OK | MB_ICONWARNING);
+        message(&text, MB_OK | MB_ICONWARNING);
         return;
     }
     // The exe has been replaced: start the new version (it waits for this one to exit before taking the single-instance lock)
     if let Some(exe) = update::exe_path() {
         let _ = std::process::Command::new(exe).arg("--after-update").spawn();
     }
-    let _ = DestroyWindow(hwnd);
+    quit(hwnd);
 }
 
 struct Layout {
@@ -318,6 +359,31 @@ pub fn on_reorder(hwnd: HWND) {
             }
         }
     }
+}
+
+/// The bar is only lifted with the taskbar while the taskbar owns it. If the shell dropped the
+/// ownership without lifting it (the bar was created while the taskbar was already up in band 6),
+/// recreate it, owned again, once the taskbar is back down.
+pub fn ensure_lifted(hwnd: HWND) {
+    unsafe {
+        let Ok(tray) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) else { return };
+        if band(hwnd) == Some(1) && band(tray) == Some(1) && GetWindow(hwnd, GW_OWNER).is_err() {
+            // WM_DESTROY asks the UI thread to create a new one
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+}
+
+/// The z-band a window is in (undocumented user32 GetWindowBand). 1 is the ordinary desktop band.
+fn band(hwnd: HWND) -> Option<u32> {
+    type GetWindowBand = unsafe extern "system" fn(HWND, *mut u32) -> BOOL;
+    static PROC: OnceLock<Option<GetWindowBand>> = OnceLock::new();
+    let f = (*PROC.get_or_init(|| unsafe {
+        let user32 = GetModuleHandleW(w!("user32.dll")).ok()?;
+        GetProcAddress(user32, s!("GetWindowBand")).map(|p| std::mem::transmute::<_, GetWindowBand>(p))
+    }))?;
+    let mut b = 0;
+    unsafe { f(hwnd, &mut b).as_bool().then_some(b) }
 }
 
 /// Whether `a` is above `b` in the z-order.
@@ -430,6 +496,7 @@ unsafe fn paint(hwnd: HWND) {
 }
 
 unsafe fn context_menu(hwnd: HWND) {
+    popup::close();
     let Ok(menu) = CreatePopupMenu() else { return };
     let latest = latest();
     let v = update::VERSION;
@@ -468,15 +535,18 @@ unsafe fn context_menu(hwnd: HWND) {
     item(menu, MF_STRING, ID_EXIT, tr!("Exit", "Thoát"));
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
+    // Open above the bar: the menu is in the ordinary band, so the taskbar may be drawn over it
+    let mut r = RECT::default();
+    let _ = GetWindowRect(hwnd, &mut r);
     // Must be foreground or the menu won't close when clicking elsewhere
-    let _ = SetForegroundWindow(hwnd);
+    let _ = SetForegroundWindow(host());
     let cmd = TrackPopupMenu(
         menu,
         TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RIGHTALIGN,
         pt.x,
-        pt.y,
+        r.top,
         None,
-        hwnd,
+        host(),
         None,
     );
     let _ = DestroyMenu(menu);
@@ -499,9 +569,7 @@ unsafe fn context_menu(hwnd: HWND) {
             });
             let _ = InvalidateRect(Some(hwnd), None, false);
         }
-        ID_EXIT => {
-            let _ = DestroyWindow(hwnd);
-        }
+        ID_EXIT => quit(hwnd),
         _ => {}
     }
 }
@@ -524,8 +592,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_LBUTTONUP => popup::toggle(),
         WM_RBUTTONUP => context_menu(hwnd),
         WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => update_position(hwnd),
-        WM_DESTROY => PostQuitMessage(0),
-        m if m == TASKBAR_CREATED.get() => update_position(hwnd),
+        WM_APP_APPBAR if wp.0 as u32 == ABN_FULLSCREENAPP => update_position(hwnd),
+        WM_DESTROY => {
+            appbar(hwnd, ABM_REMOVE);
+            if QUITTING.load(Ordering::SeqCst) {
+                PostQuitMessage(0);
+            } else {
+                let _ = PostThreadMessageW(GetCurrentThreadId(), WM_APP_RECREATE, WPARAM(0), LPARAM(0));
+            }
+        }
+        m if m == TASKBAR_CREATED.get() => {
+            // A new Explorer has forgotten the appbar registration
+            appbar(hwnd, ABM_REMOVE);
+            appbar(hwnd, ABM_NEW);
+            update_position(hwnd);
+        }
         _ => return DefWindowProcW(hwnd, msg, wp, lp),
     }
     LRESULT(0)

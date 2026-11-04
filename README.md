@@ -75,7 +75,6 @@ The binary is written to `target\release\taskbar-monitor.exe`.
 ## Limitations
 
 - Windows 11 no longer allows embedding into the taskbar, so the bar is a separate window placed over the taskbar next to the notification area. It only appears on the primary monitor's taskbar.
-- While Quick Settings is open, Windows may draw the taskbar over every ordinary always-on-top window, so the bar can be hidden until the panel closes.
 - No temperatures yet: reading CPU temperature requires a kernel driver.
 
 ## License

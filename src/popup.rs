@@ -82,6 +82,16 @@ pub fn toggle() {
     }
 }
 
+/// Close if open (the menu hangs off this window, so it must not stay on top of it).
+pub fn close() {
+    let p = POPUP.get();
+    unsafe {
+        if IsWindowVisible(p).as_bool() {
+            hide(p);
+        }
+    }
+}
+
 /// Called every second: refresh if open.
 pub fn refresh() {
     let p = POPUP.get();

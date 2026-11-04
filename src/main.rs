@@ -51,6 +51,7 @@ pub fn tick() {
         let _ = InvalidateRect(Some(ov), None, false);
     }
     popup::refresh();
+    overlay::ensure_lifted(ov);
 }
 
 /// The taskbar reclaims the top of the z-order on foreground changes, and also on its own (e.g. when
@@ -122,6 +123,17 @@ fn main() -> Result<()> {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if msg.hwnd.is_invalid() && msg.message == overlay::WM_APP_RECREATE {
+                // The bar went away with Explorer, or was dropped to be owned by the taskbar again
+                match overlay::create(hinst) {
+                    Ok(h) => {
+                        OVERLAY.set(h);
+                        overlay::update_position(h);
+                    }
+                    Err(_) => break,
+                }
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
