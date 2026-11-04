@@ -116,7 +116,7 @@ fn width(s: f32) -> i32 {
     px(2.0 * PAD + 2.0 * COL_W + GUTTER, s)
 }
 
-/// Place the popup just above the bar, right-aligned, kept inside the work area.
+/// Place the popup just above the bar, aligned with its outer edge, kept inside the work area.
 unsafe fn place(p: HWND) {
     let s = scale();
     let w = width(s);
@@ -130,7 +130,9 @@ unsafe fn place(p: HWND) {
     let _ = GetMonitorInfoW(MonitorFromRect(&a, MONITOR_DEFAULTTONEAREST), &mut mi);
     let work = mi.rcWork;
     let gap = px(8.0, s);
-    let x = (a.right - w).min(work.right - w - gap).max(work.left + gap);
+    let mon = mi.rcMonitor;
+    let x = if a.left - mon.left < mon.right - a.right { a.left } else { a.right - w };
+    let x = x.min(work.right - w - gap).max(work.left + gap);
     let y = (a.top.min(work.bottom) - h - gap).max(work.top + gap);
     let _ = SetWindowPos(p, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE);
 }

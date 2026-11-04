@@ -12,6 +12,7 @@ Shows CPU, GPU, VRAM and RAM usage right on the Windows taskbar. Click it for de
 - **Same numbers as Task Manager**: CPU and GPU come from Performance Counters (PDH). Works with NVIDIA, AMD and Intel graphics, including multi-GPU laptops.
 - **Detail panel**: per-thread CPU load, clock speed, RAM and commit charge, 3D / Copy / Video load per GPU, VRAM, and 60-second history graphs.
 - Choose which metrics appear on the bar (CPU, GPU, VRAM, RAM) from the right-click menu. CPU, GPU and RAM are shown by default.
+- Place the bar next to the notification area (default) or at the left edge of the taskbar, which is empty when the taskbar icons are centered.
 - Values ≥ 60% turn yellow, ≥ 85% turn red.
 - Hides automatically while a game or video is fullscreen.
 - Updates itself from GitHub Releases.
@@ -40,7 +41,7 @@ The exe is not code-signed yet, so SmartScreen may warn on first run: click **Mo
 |---|---|
 | Left-click the bar | Open / close the detail panel |
 | Esc or click elsewhere | Close the detail panel |
-| Right-click the bar | Menu: check for updates, metrics shown on the taskbar, start with Windows, language, exit |
+| Right-click the bar | Menu: check for updates, metrics shown on the taskbar, position, start with Windows, language, exit |
 
 ![Right-click menu](docs/menu.png)
 
@@ -74,7 +75,8 @@ The binary is written to `target\release\taskbar-monitor.exe`.
 
 ## Limitations
 
-- Windows 11 no longer allows embedding into the taskbar, so the bar is a separate window placed over the taskbar next to the notification area. It only appears on the primary monitor's taskbar.
+- Windows 11 no longer allows embedding into the taskbar, so the bar is a separate window placed over the taskbar. It only appears on the primary monitor's taskbar.
+- The left position is only available with centered taskbar icons (with left-aligned icons the Start button is there). If the Widgets button is shown, the bar leaves room for it at a fixed width.
 - No temperatures yet: reading CPU temperature requires a kernel driver.
 
 ## License

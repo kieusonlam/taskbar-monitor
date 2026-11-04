@@ -67,50 +67,66 @@ const UPDATE_DOT: COLORREF = rgb(0x4f, 0xa3, 0xff);
 
 const LABELS: [&str; 4] = ["CPU", "GPU", "VRAM", "RAM"];
 const ID_SHOW: usize = 120; // + index into LABELS
+const ID_POS_RIGHT: usize = 130;
+const ID_POS_LEFT: usize = 131;
 
 /// Which metrics are on the bar, one bit per entry of LABELS. Stored in
 /// HKCU\Software\TaskbarMonitor\Metrics; defaults to CPU, GPU and RAM.
 const DEFAULT_SHOWN: u32 = 0b1011;
 const SETTINGS_KEY: PCWSTR = w!("Software\\TaskbarMonitor");
 const SHOWN_VALUE: PCWSTR = w!("Metrics");
+/// Where the bar sits on the taskbar: 0 = right, next to the notification area; 1 = left edge.
+const POSITION_VALUE: PCWSTR = w!("Position");
+const EXPLORER_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced");
 
 thread_local! {
     static TASKBAR_CREATED: Cell<u32> = const { Cell::new(0) };
     static SHOWN: Cell<u32> = Cell::new(load_shown());
+    static LEFT: Cell<bool> = Cell::new(read_dword(SETTINGS_KEY, POSITION_VALUE) == Some(1));
 }
 
-fn load_shown() -> u32 {
+fn read_dword(key: PCWSTR, name: PCWSTR) -> Option<u32> {
     let mut v = 0u32;
     let mut size = 4u32;
     let r = unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
-            SETTINGS_KEY,
-            SHOWN_VALUE,
+            key,
+            name,
             RRF_RT_REG_DWORD,
             None,
             Some(&mut v as *mut u32 as _),
             Some(&mut size),
         )
     };
-    match v & 0b1111 {
-        bits if r == ERROR_SUCCESS && bits != 0 => bits,
+    (r == ERROR_SUCCESS).then_some(v)
+}
+
+fn write_setting(name: PCWSTR, v: u32) {
+    unsafe {
+        let _ = RegSetKeyValueW(HKEY_CURRENT_USER, SETTINGS_KEY, name, REG_DWORD.0, Some(&v as *const u32 as _), 4);
+    }
+}
+
+fn load_shown() -> u32 {
+    match read_dword(SETTINGS_KEY, SHOWN_VALUE).map(|v| v & 0b1111) {
+        Some(bits) if bits != 0 => bits,
         _ => DEFAULT_SHOWN,
     }
 }
 
 fn set_shown(bits: u32) {
     SHOWN.set(bits);
-    unsafe {
-        let _ = RegSetKeyValueW(
-            HKEY_CURRENT_USER,
-            SETTINGS_KEY,
-            SHOWN_VALUE,
-            REG_DWORD.0,
-            Some(&bits as *const u32 as _),
-            4,
-        );
-    }
+    write_setting(SHOWN_VALUE, bits);
+}
+
+/// With left-aligned taskbar icons the Start button is at the left edge, so the bar can't go there.
+fn taskbar_centered() -> bool {
+    read_dword(EXPLORER_KEY, w!("TaskbarAl")) != Some(0)
+}
+
+fn on_left() -> bool {
+    LEFT.get() && taskbar_centered()
 }
 
 fn shown(i: usize) -> bool {
@@ -416,6 +432,15 @@ unsafe fn target_rect() -> Option<(HWND, (i32, i32, i32, i32))> {
 
     let scale = GetDpiForWindow(tray) as f32 / 96.0;
     let l = layout(scale);
+    let th = tr.bottom - tr.top;
+    let h = (th - px(12.0, scale)).max(px(24.0, scale)).min(th);
+    let y = tr.top + (th - h) / 2;
+    if on_left() {
+        // The Widgets button (on unless turned off) takes the left edge of a centered taskbar
+        let widgets = read_dword(EXPLORER_KEY, w!("TaskbarDa")) != Some(0);
+        let x = tr.left + px(if widgets { 220.0 } else { 8.0 }, scale);
+        return Some((tray, (x, y, l.width, h)));
+    }
     let right = match FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), PCWSTR::null()) {
         Ok(n) => {
             let mut r = RECT::default();
@@ -424,9 +449,7 @@ unsafe fn target_rect() -> Option<(HWND, (i32, i32, i32, i32))> {
         }
         Err(_) => tr.right - px(300.0, scale),
     };
-    let th = tr.bottom - tr.top;
-    let h = (th - px(12.0, scale)).max(px(24.0, scale)).min(th);
-    Some((tray, (right - px(8.0, scale) - l.width, tr.top + (th - h) / 2, l.width, h)))
+    Some((tray, (right - px(8.0, scale) - l.width, y, l.width, h)))
 }
 
 /// Whether a fullscreen app (game, video) is active on the taskbar's monitor.
@@ -522,6 +545,13 @@ unsafe fn context_menu(hwnd: HWND) {
         }
         item(menu, MF_POPUP, sub.0 as usize, tr!("Show on taskbar", "Hiển thị trên taskbar"));
     }
+    if let Ok(sub) = CreatePopupMenu() {
+        let left = on_left();
+        let left_ok = if taskbar_centered() { MF_ENABLED } else { MF_GRAYED };
+        item(sub, MF_STRING | check(!left), ID_POS_RIGHT, tr!("Right, next to the notification area", "Bên phải, cạnh khay hệ thống"));
+        item(sub, MF_STRING | check(left) | left_ok, ID_POS_LEFT, tr!("Left edge of the taskbar", "Mép trái taskbar"));
+        item(menu, MF_POPUP, sub.0 as usize, tr!("Position", "Vị trí"));
+    }
     item(menu, MF_STRING | check(autostart::enabled()), ID_AUTOSTART, tr!("Start with Windows", "Khởi động cùng Windows"));
     if let Ok(sub) = CreatePopupMenu() {
         // Language names stay in their own language so anyone can find theirs
@@ -560,6 +590,11 @@ unsafe fn context_menu(hwnd: HWND) {
             set_shown(SHOWN.get() ^ (1 << (id - ID_SHOW)));
             update_position(hwnd);
             let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+        id @ (ID_POS_RIGHT | ID_POS_LEFT) => {
+            LEFT.set(id == ID_POS_LEFT);
+            write_setting(POSITION_VALUE, LEFT.get() as u32);
+            update_position(hwnd);
         }
         id @ (ID_LANG_AUTO | ID_LANG_EN | ID_LANG_VI) => {
             i18n::set_choice(match id {
