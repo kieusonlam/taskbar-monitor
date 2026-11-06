@@ -15,16 +15,16 @@ Shows CPU, GPU, VRAM and RAM usage right on the Windows taskbar. Click it for de
 - Place the bar next to the notification area (default) or at the left edge of the taskbar, which is empty when the taskbar icons are centered.
 - Values ≥ 60% turn yellow, ≥ 85% turn red.
 - Hides automatically while a game or video is fullscreen.
-- Updates itself from GitHub Releases.
+- Stays up to date: through the Microsoft Store, or from GitHub Releases for the manual download.
 
 The interface is available in English and Vietnamese. It follows the Windows display language by default and can be changed from the right-click menu.
 
 ## Install
 
-With winget (once the package is approved):
+From the [Microsoft Store](https://apps.microsoft.com/detail/9MVC9WD60H1S), or with winget:
 
 ```
-winget install LamKieu.TaskbarMonitor
+winget install 9MVC9WD60H1S --source msstore
 ```
 
 Or manually:
@@ -46,6 +46,8 @@ The exe is not code-signed yet, so SmartScreen may warn on first run: click **Mo
 ![Right-click menu](docs/menu.png)
 
 ## Updates
+
+The Microsoft Store version is updated by the Store. The rest of this section applies to the manual download.
 
 The app checks for a new release 15 seconds after starting and then once a day. When one is available, a blue dot appears in the corner of the bar; right-click and choose **Update to vX.Y.Z**, and the app downloads the new exe, swaps it in and restarts.
 
