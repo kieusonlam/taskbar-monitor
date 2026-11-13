@@ -87,11 +87,15 @@ thread_local! {
 }
 
 fn read_dword(key: PCWSTR, name: PCWSTR) -> Option<u32> {
+    read_dword_in(HKEY_CURRENT_USER, key, name)
+}
+
+fn read_dword_in(root: HKEY, key: PCWSTR, name: PCWSTR) -> Option<u32> {
     let mut v = 0u32;
     let mut size = 4u32;
     let r = unsafe {
         RegGetValueW(
-            HKEY_CURRENT_USER,
+            root,
             key,
             name,
             RRF_RT_REG_DWORD,
@@ -124,6 +128,13 @@ fn set_shown(bits: u32) {
 /// With left-aligned taskbar icons the Start button is at the left edge, so the bar can't go there.
 fn taskbar_centered() -> bool {
     read_dword(EXPLORER_KEY, w!("TaskbarAl")) != Some(0)
+}
+
+/// Whether the Widgets button takes the left edge of the taskbar. TaskbarDa is absent until Widgets
+/// is toggled in Settings, so absent means shown, unless the "Allow widgets" policy turns it off.
+fn widgets_shown() -> bool {
+    let policy = read_dword_in(HKEY_LOCAL_MACHINE, w!("Software\\Policies\\Microsoft\\Dsh"), w!("AllowNewsAndInterests"));
+    policy != Some(0) && read_dword(EXPLORER_KEY, w!("TaskbarDa")) != Some(0)
 }
 
 fn on_left() -> bool {
@@ -439,9 +450,7 @@ unsafe fn target_rect() -> Option<(HWND, (i32, i32, i32, i32))> {
     let h = (th - px(12.0, scale)).max(px(24.0, scale)).min(th);
     let y = tr.top + (th - h) / 2;
     if on_left() {
-        // The Widgets button (on unless turned off) takes the left edge of a centered taskbar
-        let widgets = read_dword(EXPLORER_KEY, w!("TaskbarDa")) != Some(0);
-        let x = tr.left + px(if widgets { 220.0 } else { 8.0 }, scale);
+        let x = tr.left + px(if widgets_shown() { 220.0 } else { 8.0 }, scale);
         return Some((tray, (x, y, l.width, h)));
     }
     let right = match FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), PCWSTR::null()) {
